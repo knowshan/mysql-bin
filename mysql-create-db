@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# == Author 
+#    Shantanu Pavgi, knowshantanu@gmail.com
+ 
+
+# == Description
+#    Script to create MySQL database on local MySQL server 
+
+# == TODO 
+
+# == Bugs
+
+ 
+# Display usage
+usage(){
+cat << EOF
+Create database in the local MySQL server 
+OPTIONS: 
+-h Display this usage message
+-a admin credentials file in 'user:password' format (Required)
+-d dbname (Required)
+EOF
+exit 0
+}
+
+# Display usage help if script is called without any options
+if [[ $# -eq 0 ]]; then 
+  usage
+fi
+
+# Start-While parse command-line options
+while getopts ":ha:d:" option 
+do
+  case $option in
+   h) 
+    usage
+    ;;
+   a) 
+    admincred=$OPTARG
+    ;;
+   d) 
+    dbname=$OPTARG
+    ;;
+   :)
+    echo "Option -$OPTARG requires an argument." >&2 
+    exit 1
+    ;;
+   \?)
+     echo "Invalid Option: -$OPTARG" >&2
+     exit 1 
+  esac 
+done 
+# End-While parse command-line options
+
+# Process options and set/eval defaults 
+function process_options(){
+  if [[ -z "$dbname" ]]; then 
+    echo "ERROR: -d <dbname> option is reqyuired. Run '$0 -h' to get usage help."
+    exit 1
+  fi
+}
+
+# Checks if given file exists and is readable; exit otherwise
+function file_exists(){
+  file_exists_ip=$1
+  if [[ ! -r "$file_exists_ip" ]]; then
+    echo "ERROR: $file_exists_ip file doesn't exist or unreadable." >&2
+    exit 1
+  fi 
+}
+
+# Read first line of file containing MySQL admin/root user credential 
+# in format username:password
+function read_admin(){
+  read_admin_ip=$1
+  file_exists $read_admin_ip
+  rootuser=$(awk -F ':' 'NR==1 { print $1 }' $read_admin_ip)
+  rootpw=$(awk -F ':' 'NR==1 { print $2 }' $read_admin_ip) 
+}
+
+# Checks if given db already exists; continue if it doesn't exists
+# IP: dbname
+# OP: exits with exit code 1 if db exists
+function db_exists(){
+  db_exists_ip=$1
+  db_list=`mysql -u $rootuser -p$rootpw -B -s -e 'show databases;'`
+  for db in $db_list; do
+    if [ "$db_exists_ip" == "$db" ]; then
+     echo "ERROR: The $db_exists_ip already exists.." >&2
+     exit 1
+    fi
+  done
+}
+
+# Tries to create given db
+# IP: dbname 
+function create_db(){
+  create_db_ip=$1
+  create_db_op=`mysqladmin -u $rootuser -p$rootpw create $create_db_ip`
+  create_db_exit_code=$?
+  # Tell user if db creation was successful; exit with an appropriate code
+  if [[ $create_db_exit_code -eq 0 ]]; then  
+    echo "Created $create_db_ip successfully."
+    exit 0
+  else 
+    echo $create_db_op
+    exit $create_db_exit_code
+  fi
+}
+
+# Process options
+process_options
+# Read admin credentials file 
+read_admin $admincred
+# Check if db exists
+db_exists $dbname
+# Try to create db
+create_db $dbname
+
+
