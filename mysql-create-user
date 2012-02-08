@@ -1,0 +1,126 @@
+#!/bin/bash
+
+# == Author 
+#    Shantanu Pavgi, knowshantanu@gmail.com
+ 
+
+# == Description
+#    Script to create MySQL user account on a local MySQL server 
+
+# == TODO 
+
+# == Bugs
+
+# == Example
+#    ./mysql-create-user -a $HOME/secrets/mysql_auth -f users_file
+#    Format of mysql_auth: "username:password". Scripts read only first line.
+#    Format of user_file: "username:hostname:password". Script reads all lines.
+ 
+# Display usage
+usage(){
+cat << EOF
+Create specified user accounts in the local MySQL server 
+OPTIONS: 
+-h Display this usage message
+-a admin credentials file in 'user:password' format (Required)
+-f users file (Required)
+EOF
+exit 0
+}
+
+# Display usage help if script is called without any options
+if [[ $# -eq 0 ]]; then 
+  usage
+fi
+
+# Start-While parse command-line options
+while getopts ":ha:f:" option 
+do
+  case $option in
+   h) 
+    usage
+    ;;
+   a) 
+    admincred=$OPTARG
+    ;;
+   f) 
+    usersfile=$OPTARG
+    ;;
+   :)
+    echo "Option -$OPTARG requires an argument." >&2 
+    exit 1
+    ;;
+   \?)
+     echo "Invalid Option: -$OPTARG" >&2
+     exit 1 
+  esac 
+done 
+# End-While parse command-line options
+
+# Process options and set/eval defaults 
+function process_options(){
+  if [[ -z "$usersfile" ]]; then 
+    echo "ERROR: -f <usersfile> option is required. Run '$0 -h' to get usage help."
+    exit 1
+  fi
+}
+
+# Checks if given file exists and is readable; exit otherwise
+function file_exists(){
+  file_exists_ip=$1
+  if [[ ! -r "$file_exists_ip" ]]; then
+    echo "ERROR: $file_exists_ip file doesn't exist or unreadable." >&2
+    exit 1
+  fi 
+}
+
+# Read first line of file containing MySQL admin/root user credential 
+# in format username:password
+function read_admin(){
+  read_admin_ip=$1
+  file_exists $read_admin_ip
+  rootuser=$(awk -F ':' 'NR==1 { print $1 }' $read_admin_ip)
+  rootpw=$(awk -F ':' 'NR==1 { print $2 }' $read_admin_ip) 
+}
+
+# Read usersfile containing list of MySQL user credential to be created
+# in format username:hostname:password
+function read_usersfile(){
+  read_usersfile_ip=$1
+  file_exists $read_usersfile_ip
+  # while read line
+  # do
+  #  users=$line
+  # done < $read_usersfile_ip
+  users=$(cat $read_usersfile_ip)
+}
+
+# Execute given MySQL query
+function mysql_query_exec(){
+  query=$1
+  echo "My query $query"
+  mysql_query_op=`mysql -u $rootuser -p$rootpw -e "$query;"`
+  echo $mysql_query_op 
+}
+
+# Tries to create given user account
+function create_users(){
+  for user in $users; do
+    # TIP: don't split - uarr=$(echo $user | tr ":" " \n") ; this won't give you an array
+    # http://shortrecipes.blogspot.com/2010/02/bash-split-string-to-array.html
+    uarr=(`echo $user | tr ":" " \n"`) 
+    Q1="create user '${uarr[0]}'@'${uarr[1]}' IDENTIFIED BY '${uarr[2]}';"
+    echo $Q1
+    # NOTE: Pass variable using double-quotes for correct substitution; else only 'create' will be passed
+    # example - don't call - mysql_query_exec $Q1 
+    mysql_query_exec "$Q1"
+  done
+}
+
+# Process options
+process_options
+# Read admin credentials file 
+read_admin $admincred
+# Read users file
+read_usersfile $usersfile
+create_users
