@@ -5,7 +5,7 @@
  
 
 # == Description
-#    Script to create MySQL user account on a local MySQL server 
+#    Script to create MySQL user accounts in the local MySQL server 
 
 # == TODO 
 
@@ -23,7 +23,7 @@ Create specified user accounts in the local MySQL server
 OPTIONS: 
 -h Display this usage message
 -a admin credentials file in 'user:password' format (Required)
--f users file (Required)
+-f users file in 'username:hostname:password' format (Required)
 EOF
 exit 0
 }
@@ -72,6 +72,19 @@ function file_exists(){
     echo "ERROR: $file_exists_ip file doesn't exist or unreadable." >&2
     exit 1
   fi 
+}
+
+function correct_syntax(){
+  fname=$1
+  pattern=$2
+  unmatch=`grep -E -s -v -n $pattern $fname | sed -r 's/([0-9]+):.+/Line#\1  &/'`
+  if [[ -z "$unmatch" ]]; then
+    return 0;
+  else
+    echo "ERROR: Following lines in $fname are not in correct syntax:"
+    echo "$unmatch" 
+    exit 1;
+  fi
 }
 
 # Read first line of file containing MySQL admin/root user credential 
@@ -123,4 +136,8 @@ process_options
 read_admin $admincred
 # Read users file
 read_usersfile $usersfile
+admincred_regex=""^[[:alnum:]]+:[[:alnum:]]+""
+userfile_regex=""^[[:alnum:]]+:[[:alnum:]]+:[[:alnum:]]+""
+correct_syntax $admincred $admincred_regex
+correct_syntax $usersfile $userfile_regex
 create_users
