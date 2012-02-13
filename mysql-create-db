@@ -18,50 +18,90 @@
 # Display usage
 usage(){
 cat << EOF
+HELP:
 Create database in the local MySQL server 
 OPTIONS: 
--h Display this usage message
--a admin credentials file in 'user:password' format (Required)
--d dbname (Required)
+-h|--help                  Display this usage message
+-c|--connection-defaults   MySQL '--defaults-file' containing root/admin user credentials (Optional)
+-d|--database              Database name to be created (Required)
+
+Format for connection-defaults file is same as MySQL 'defaults-file'. If this option is 
+unspecified then default locations viz. '' will be tried by the mysql    
+For details - run 'mysql -?' or refer MySQL manual.  
+To run this command you will need at least following contents:
+[client]
+user='<root-username>'
+password='<root-password>'  
 EOF
 exit 0
 }
+
+
+# Declare defaults
+declare mycnf_default="usedefault"
+
 
 # Display usage help if script is called without any options
 if [[ $# -eq 0 ]]; then 
   usage
 fi
 
+function read_options(){
+# Try following commands in 'regular' interactive bash session to get better grip over getopt
+
+# Get output (options list) from getopt  
+TEMP_OPTS=`getopt -o hc:d: --longoptions help,connection-defaults:,database: -- $@`
+
+# $? exit code will be non-zero if options passed using $@ aren't passed according getopt command options  
+if [ $? != 0 ]; then 
+  echo "ERROR: Terminating $0.." >&2 
+  # Display help/usage and exit
+  usage
+  exit 1
+fi
+
+eval set -- "$TEMP_OPTS"
+
 # Start-While parse command-line options
-while getopts ":ha:d:" option 
+while true
 do
-  case $option in
-   h) 
+  case "$1" in
+   -h|--help) 
     usage
     ;;
-   a) 
-    admincred=$OPTARG
+   -c|--connection-defaults)
+    # read path to mycnf file and shift by 2 
+    mycnf=$2
+    shift 2
     ;;
-   d) 
-    dbname=$OPTARG
+   -d|--database) 
+    dbname=$2;
+    shift 2
     ;;
-   :)
-    echo "Option -$OPTARG requires an argument." >&2 
-    exit 1
-    ;;
-   \?)
-     echo "Invalid Option: -$OPTARG" >&2
+   --)
+     # -- indicates end of options list - break out of the loop
+     shift 
+     break 
+     ;;
+   *)
+     # For any option other than above - return Invalid Option error
+     echo "ERROR: Invalid Option: $1" >&2
      exit 1 
+     ;;
   esac 
 done 
 # End-While parse command-line options
+}
 
 # Process options and set/eval defaults 
 function process_options(){
   if [[ -z "$dbname" ]]; then 
-    echo "ERROR: -d <dbname> option is reqyuired. Run '$0 -h' to get usage help."
+    echo "ERROR: -d <dbname> option is required. Run '$0 -h' to get usage help."
     exit 1
   fi
+  # Set mycnf (--defaults-file) value according to input options
+  # This will be used in constructing in actual commands 
+  mycnf=${mycnf:=$mycnf_default}
 }
 
 # Checks if given file exists and is readable; exit otherwise
@@ -73,38 +113,44 @@ function file_exists(){
   fi 
 }
 
-# Read first line of file containing MySQL admin/root user credential 
-# in format username:password
-function read_admin(){
-  read_admin_ip=$1
-  file_exists $read_admin_ip
-  rootuser=$(awk -F ':' 'NR==1 { print $1 }' $read_admin_ip)
-  rootpw=$(awk -F ':' 'NR==1 { print $2 }' $read_admin_ip) 
-}
-
 # Checks if given db already exists; continue if it doesn't exists
-# IP: dbname
+# IP:mycnf, dbname
 # OP: exits with exit code 1 if db exists
 function db_exists(){
-  db_exists_ip=$1
-  db_list=`mysql -u $rootuser -p$rootpw -B -s -e 'show databases;'`
+  mycnf_i=$1
+  dbname_i=$2
+  if [[ "$mycnf_i" == "$mycnf_default" ]]; then
+    db_exists_command="mysql -B -s -e 'show databases;'"
+  else
+    db_exists_command="mysql --defaults-file=$mycnf_i -B -s -e 'show databases;'"
+  fi  
+  db_list=$(eval $db_exists_command)
   for db in $db_list; do
-    if [ "$db_exists_ip" == "$db" ]; then
-     echo "ERROR: The $db_exists_ip already exists.." >&2
+    if [ "$dbname_i" == "$db" ]; then
+     echo "ERROR: The $dbname_i already exists.." >&2
      exit 1
     fi
   done
 }
 
 # Tries to create given db
-# IP: dbname 
+# IP: mycnf, dbname 
 function create_db(){
-  create_db_ip=$1
-  create_db_op=`mysqladmin -u $rootuser -p$rootpw create $create_db_ip`
+  mycnf_i=$1
+  dbname_i=$2
+
+  # Construct create_db_command depending on input options
+  if [[ "$mycnf_i" == "$mycnf_default" ]]; then
+    create_db_command="mysqladmin create $dbname_i"
+  else
+    create_db_command="mysqladmin --defaults-file=$mycnf_i create $dbname_i"
+  fi
+  
+  create_db_op=$(eval $create_db_command)
   create_db_exit_code=$?
   # Tell user if db creation was successful; exit with an appropriate code
   if [[ $create_db_exit_code -eq 0 ]]; then  
-    echo "Created $create_db_ip successfully."
+    echo "Created $dbname_i successfully."
     exit 0
   else 
     echo $create_db_op
@@ -112,13 +158,23 @@ function create_db(){
   fi
 }
 
+
+# Main/FunctionCalls
+
+# Read Input: 
+# Call read_options to read options using getopt
+read_options "$@"
+
 # Process options
 process_options
-# Read admin credentials file 
-read_admin $admincred
-# Check if db exists
-db_exists $dbname
-# Try to create db
-create_db $dbname
+
+# Checks  
+## Dry-Run to test connection, Check if db exists etc.
+# file_exists $mycnf
+db_exists $mycnf $dbname
+
+# Run command
+## Try to create given database
+create_db $mycnf $dbname
 
 
