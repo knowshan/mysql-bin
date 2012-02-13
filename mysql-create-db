@@ -12,8 +12,9 @@
 # == Bugs
 
 # == Example
-#    ./mysql-create-db -a $HOME/secrets/mysql_auth -d awesomedb
-#    Format of mysql_auth: "username:password". Scripts read only first line.
+#    ./mysql-create-db -c $HOME/secrets/mysql_auth -d awesomedb
+#      mysql_auth file should be in same format as MySQL 'defaults-file'; it will be passed directly to the 
+#      mysql and mysqladmin commands. 
  
 # Display usage
 usage(){
