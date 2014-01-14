@@ -44,7 +44,7 @@ exit 0
 # Declare defaults
 declare sccnf_default="$HOME/.sc.my.cnf"
 declare rdscnf_default="$HOME/.rds.my.cnf"
-
+declare runmode_default=true
 
 # Display usage help if script is called without any options
 if [[ $# -eq 0 ]]; then 
@@ -89,7 +89,8 @@ do
     shift 2
     ;;
    -n|--no-op)
-    dryrun=1
+    runmode=false
+    shift
     ;;
    --)
      # -- indicates end of options list - break out of the loop
@@ -116,6 +117,7 @@ function process_options(){
   # This will be used in constructing in actual commands 
   sccnf=${sccnf:=$sccnf_default}
   rdscnf=${rdscnf:=$rdscnf_default}
+  runmode=${runmode:=$runmode_default}
 }
 
 # Checks if given file exists and is readable; exit otherwise
@@ -142,7 +144,6 @@ function db_exists(){
   return 1
 }
 
-
 function db_get_master_file(){
   dbname_i="$1"
   # echo $dbname_i
@@ -158,43 +159,27 @@ function db_get_master_pos(){
 function db_create_dump(){
   mycnf_i="$1"
   dbname_i="$2"
+  runmode_i="$3"
   echo "Creating mysqldump of $dbname_i using $mycnf_i configuration"
-  mysqldump --defaults-extra-file="$mycnf_i" --master-data=2 $dbname_i > $dbname_i.dump
-}
-
-function rds_load_dump(){
-  echo 'Upload dump to RDS'
-}
-
-function rds_setup_master(){
-  echo 'RDS setup master'
-}
-
-function rds_start_repl(){
-  echo 'RDS start repl'
+  if $runmode_i; then
+    mysqldump --defaults-extra-file="$mycnf_i" --master-data=2 $dbname_i > $dbname_i.dump
+  fi
 }
 
 # Tries to create given db
 # IP: mycnf, dbname 
 function create_db(){
-  mycnf_i=$1
-  dbname_i=$2
-
-  # Construct create_db_command depending on input options
-  if [[ "$mycnf_i" == "$mycnf_default" ]]; then
-    create_db_command="mysqladmin create $dbname_i"
-  else
-    create_db_command="mysqladmin --defaults-file=$mycnf_i create $dbname_i"
-  fi
-  
-  create_db_op=$(eval $create_db_command)
-  create_db_exit_code=$?
+  mycnf_i="$1"
+  dbname_i="$2"
+  runmode_i="$3"
+  create_db_command="CREATE DATABASE IF NOT EXISTS $dbname_i;"
+  exec_query $mycnf_i "$create_db_command" "$runmode_i"
+  create_db_exit_code="$?"
   # Tell user if db creation was successful; exit with an appropriate code
   if [[ $create_db_exit_code -eq 0 ]]; then  
     echo "Created $dbname_i successfully."
   else 
-    echo $create_db_op
-    exit $create_db_exit_code
+    return $create_db_exit_code
   fi
 }
 
@@ -202,8 +187,12 @@ function create_db(){
 function exec_query(){
   mycnf_i="$1"
   query_i="$2"
+  runmode_i="$3"
   echo "# Executing: $query_i"
-  mysql --defaults-file="$mycnf_i" -e "$query_i"
+  if $runmode_i; then
+    mysql --defaults-file="$mycnf_i" -e "$query_i"
+  fi
+  return $?
 }
 
 
@@ -211,11 +200,10 @@ function exec_query(){
 
 # Read Input: 
 # Call read_options to read options using getopt
+echo 'P'
 read_options "$@"
-
 # Process options
 process_options
-
 # Checks  
 ## Dry-Run to test connection, Check if db exists etc.
 # file_exists $mycnf
@@ -230,20 +218,21 @@ else
 fi
 
 # Run command
-db_create_dump $sccnf $dbname
+db_create_dump $sccnf $dbname $runmode
 
 mlf=`db_get_master_file $dbname`
 mlp=`db_get_master_pos $dbname`
 
-create_db $rdscnf $dbname
-mysql --defaults-file="$rdscnf" "$dbname" < "$dbname.dump"
-
+create_db "$rdscnf" "$dbname" "$runmode"
+if $runmode; then
+  mysql --defaults-file="$rdscnf" "$dbname" < "$dbname.dump"
+fi
 schost=$(awk -F '=' '/^host/ {print $2}' $sccnf | head -1)
 scuser=$(awk -F '=' '/^user/ {print $2}' $sccnf | head -1)
 scpassword=$(awk -F '=' '/^password/ {print $2}' $sccnf | head -1)
 set_master="CALL mysql.rds_set_external_master ('$schost', 3306, '$scuser', '$scpassword', '$mlf', '$mlp', 1);"
 start_repl="CALL mysql.rds_start_replication;"
 
-exec_query $rdscnf "$set_master"
-exec_query $rdscnf "$start_repl"
+exec_query $rdscnf "$set_master" "$runmode"
+exec_query $rdscnf "$start_repl" "$runmode"
 
