@@ -137,7 +137,6 @@ function db_exists(){
   dbname_i=$2
   db_exists_command="mysql --defaults-file=$mycnf_i --skip-column-names -B -s -e \"show databases like '$dbname_i';\""
   db_ret=$(eval $db_exists_command)
-  echo $db_ret
   if [ "$dbname_i" == "$db_ret" ]; then
     return 0
   fi
@@ -200,7 +199,6 @@ function exec_query(){
 
 # Read Input: 
 # Call read_options to read options using getopt
-echo 'P'
 read_options "$@"
 # Process options
 process_options
@@ -209,7 +207,6 @@ process_options
 # file_exists $mycnf
 db_exists $sccnf $dbname
 ret="$?"
-echo $ret
 if [[ "$ret" == 0 ]]; then
   echo "Found $dbname on source"
 else
@@ -218,7 +215,7 @@ else
 fi
 
 # Run command
-db_create_dump $sccnf $dbname $runmode
+#### db_create_dump $sccnf $dbname $runmode
 
 mlf=`db_get_master_file $dbname`
 mlp=`db_get_master_pos $dbname`
@@ -227,9 +224,13 @@ create_db "$rdscnf" "$dbname" "$runmode"
 if $runmode; then
   mysql --defaults-file="$rdscnf" "$dbname" < "$dbname.dump"
 fi
+
+#Ugly hack to correctly parse values/password containing = 
 schost=$(awk -F '=' '/^host/ {print $2}' $sccnf | head -1)
 scuser=$(awk -F '=' '/^user/ {print $2}' $sccnf | head -1)
 scpassword=$(awk -F '=' '/^password/ {print $2}' $sccnf | head -1)
+scpassword_t=$(sed -n '/^password/p' $sccnf | head -1)
+scpassword=${scpassword_t#*=}
 set_master="CALL mysql.rds_set_external_master ('$schost', 3306, '$scuser', '$scpassword', '$mlf', '$mlp', 1);"
 start_repl="CALL mysql.rds_start_replication;"
 
