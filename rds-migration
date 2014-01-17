@@ -55,7 +55,7 @@ function read_options(){
 # Try following commands in 'regular' interactive bash session to get better grip over getopt
 
 # Get output (options list) from getopt  
-TEMP_OPTS=`getopt -o hs:r:d:n --longoptions help,source-connection-config:,rds-connection-config:,database:,no-op -- $@`
+TEMP_OPTS=`getopt -o hs:r:d:n --longoptions help,source-connection-config:,rds-connection-config:,database:,no-op -- "$@"`
 
 # $? exit code will be non-zero if options passed using $@ aren't passed according getopt command options  
 if [ $? != 0 ]; then 
@@ -85,7 +85,7 @@ do
     shift 2
     ;;
    -d|--database) 
-    dbname=$2;
+    dbname="$2";
     shift 2
     ;;
    -n|--no-op)
@@ -144,24 +144,24 @@ function db_exists(){
 }
 
 function db_get_master_file(){
-  dbname_i="$1"
-  # echo $dbname_i
-  awk -F "'"  '/-- CHANGE MASTER/ {print $2 }' $dbname_i.dump
+  dumpfile_i="$1"
+  awk -F "'"  '/-- CHANGE MASTER/ {print $2 }' $dumpfile_i
 }
 
 function db_get_master_pos(){
   dbname_i="$1"
-  # echo $dbname_i
-  awk -F "MASTER_LOG_POS"  '/-- CHANGE MASTER/ {gsub(/=|;/, "", $2); print $2 }' $dbname_i.dump
+  awk -F "MASTER_LOG_POS"  '/-- CHANGE MASTER/ {gsub(/=|;/, "", $2); print $2 }' $dumpfile_i
 }
 
 function db_create_dump(){
   mycnf_i="$1"
   dbname_i="$2"
-  runmode_i="$3"
-  echo "Creating mysqldump of $dbname_i using $mycnf_i configuration"
+  dumpfile_i="$3"
+  runmode_i="$4"
+  cmd="mysqldump --defaults-extra-file=$mycnf_i --master-data=2 --databases ${dbname_i} > $dumpfile_i"
+  echo $cmd
   if $runmode_i; then
-    mysqldump --defaults-extra-file="$mycnf_i" --master-data=2 $dbname_i > $dbname_i.dump
+    eval $cmd
   fi
 }
 
@@ -171,15 +171,18 @@ function create_db(){
   mycnf_i="$1"
   dbname_i="$2"
   runmode_i="$3"
-  create_db_command="CREATE DATABASE IF NOT EXISTS $dbname_i;"
-  exec_query $mycnf_i "$create_db_command" "$runmode_i"
-  create_db_exit_code="$?"
-  # Tell user if db creation was successful; exit with an appropriate code
-  if [[ $create_db_exit_code -eq 0 ]]; then  
-    echo "Created $dbname_i successfully."
-  else 
-    return $create_db_exit_code
-  fi
+  # string to array
+  dbnames=($dbname_i)
+  for d in "${dbnames[@]}"
+  do
+    create_db_command="CREATE DATABASE IF NOT EXISTS $d;"
+    exec_query $mycnf_i "$create_db_command" "$runmode_i"
+    create_db_exit_code="$?"
+    # Tell user if db creation was successful; exit with an appropriate code
+    if [[ $create_db_exit_code -eq 0 ]]; then  
+      echo "Created $d successfully."
+    fi
+  done
 }
 
 
@@ -204,7 +207,8 @@ read_options "$@"
 process_options
 # Checks  
 ## Dry-Run to test connection, Check if db exists etc.
-# file_exists $mycnf
+file_exists $sccnf
+file_exists $rdscnf
 db_exists $sccnf $dbname
 ret="$?"
 if [[ "$ret" == 0 ]]; then
@@ -215,14 +219,24 @@ else
 fi
 
 # Run command
-#### db_create_dump $sccnf $dbname $runmode
+dumphost=$(awk -F '=' '/^host/ {print $2}' $sccnf | head -1)
+datetime=$(date +%Y-%m-%d-%H-%M-%S)
+dumpfile="$dumphost-$datetime.dump"
+db_create_dump "$sccnf" "$dbname" "$dumpfile" $runmode
 
-mlf=`db_get_master_file $dbname`
-mlp=`db_get_master_pos $dbname`
+if $runmode; then
+  mlf=`db_get_master_file $dumpfile`
+  mlp=`db_get_master_pos $dumpfile`
+else
+  mlf='master-log-file'
+  mlp='master-log-position'
+fi
 
 create_db "$rdscnf" "$dbname" "$runmode"
+
+echo "Loading MySQL dump to RDS"
 if $runmode; then
-  mysql --defaults-file="$rdscnf" "$dbname" < "$dbname.dump"
+  mysql --defaults-file="$rdscnf" < "$dumpfile"
 fi
 
 #Ugly hack to correctly parse values/password containing = 
