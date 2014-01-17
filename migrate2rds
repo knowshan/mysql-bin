@@ -44,6 +44,7 @@ exit 0
 declare sccnf_default="$HOME/.sc.my.cnf"
 declare rdscnf_default="$HOME/.rds.my.cnf"
 declare runmode_default=true
+declare sslencryption_default=0
 
 # Display usage help if script is called without any options
 if [[ $# -eq 0 ]]; then 
@@ -52,7 +53,7 @@ fi
 
 function read_options(){
 # Get output (options list) from getopt  
-  TEMP_OPTS=`getopt -o hs:r:d:n --longoptions help,source-connection-config:,rds-connection-config:,database:,no-op -- "$@"`
+  TEMP_OPTS=`getopt -o hs:r:d:ne --longoptions help,source-connection-config:,rds-connection-config:,database:,no-op,encryption-ssl -- "$@"`
 
   # $? exit code will be non-zero if options passed using $@ aren't passed according getopt command options  
   if [ $? != 0 ]; then 
@@ -85,6 +86,10 @@ function read_options(){
       dbname="$2";
       shift 2
       ;;
+     -e|--encryption-ssl)
+      sslencryption=1
+      shift
+      ;;
      -n|--no-op)
       runmode=false
       shift
@@ -114,6 +119,7 @@ function process_options(){
   sccnf=${sccnf:=$sccnf_default}
   rdscnf=${rdscnf:=$rdscnf_default}
   runmode=${runmode:=$runmode_default}
+  sslencryption=${sslencryption:=$sslencryption_default}
 }
 
 # Checks if given file exists and is readable; exit otherwise
@@ -241,7 +247,7 @@ scuser=$(awk -F '=' '/^user/ {print $2}' $sccnf | head -1)
 scpassword=$(awk -F '=' '/^password/ {print $2}' $sccnf | head -1)
 scpassword_t=$(sed -n '/^password/p' $sccnf | head -1)
 scpassword=${scpassword_t#*=}
-set_master="CALL mysql.rds_set_external_master ('$schost', 3306, '$scuser', '$scpassword', '$mlf', '$mlp', 1);"
+set_master="CALL mysql.rds_set_external_master ('$schost', 3306, '$scuser', '$scpassword', '$mlf', '$mlp', $sslencryption);"
 start_repl="CALL mysql.rds_start_replication;"
 
 # Execute RDS replication procedure calls
