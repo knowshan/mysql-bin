@@ -12,9 +12,8 @@
 # == Bugs
 
 # == Example
-#    ./migrate2rds -c $HOME/secrets/mysql_auth -d awesomedb
-#      mysql_auth file should be in same format as MySQL 'defaults-file'; it will be passed directly to the 
-#      mysql client
+#    ./migrate2rds -s $HOME/secrets/mysql_auth -r $HOME/secrets/rds_auth -d "db1 db2"
+#      mysql_auth and rds_auth files should follow MySQL defaults-file INI format.
  
 # Display usage
 usage(){
@@ -52,59 +51,57 @@ if [[ $# -eq 0 ]]; then
 fi
 
 function read_options(){
-# Try following commands in 'regular' interactive bash session to get better grip over getopt
-
 # Get output (options list) from getopt  
-TEMP_OPTS=`getopt -o hs:r:d:n --longoptions help,source-connection-config:,rds-connection-config:,database:,no-op -- "$@"`
+  TEMP_OPTS=`getopt -o hs:r:d:n --longoptions help,source-connection-config:,rds-connection-config:,database:,no-op -- "$@"`
 
-# $? exit code will be non-zero if options passed using $@ aren't passed according getopt command options  
-if [ $? != 0 ]; then 
-  echo "ERROR: Terminating $0.." >&2 
-  # Display help/usage and exit
-  usage
-  exit 1
-fi
-
-eval set -- "$TEMP_OPTS"
-
-# Start-While parse command-line options
-while true
-do
-  case "$1" in
-   -h|--help) 
+  # $? exit code will be non-zero if options passed using $@ aren't passed according getopt command options  
+  if [ $? != 0 ]; then 
+    echo "ERROR: Terminating $0.." >&2 
+    # Display help/usage and exit
     usage
-    ;;
-   -s|--source-connection-config)
-    # read path to source mycnf file and shift by 2 
-    sccnf=$2
-    shift 2
-    ;;
-   -r|--rds-connection-config)
-    # read path to rds mycnf file and shift by 2 
-    rdscnf=$2
-    shift 2
-    ;;
-   -d|--database) 
-    dbname="$2";
-    shift 2
-    ;;
-   -n|--no-op)
-    runmode=false
-    shift
-    ;;
-   --)
-     # -- indicates end of options list - break out of the loop
-     shift
-     break
+    exit 1
+  fi
+
+  eval set -- "$TEMP_OPTS"
+
+  # Start-While parse command-line options
+  while true
+  do
+    case "$1" in
+     -h|--help) 
+      usage
+      ;;
+     -s|--source-connection-config)
+      # read path to source mycnf file and shift by 2 
+      sccnf=$2
+      shift 2
+      ;;
+     -r|--rds-connection-config)
+      # read path to rds mycnf file and shift by 2 
+      rdscnf=$2
+      shift 2
+      ;;
+     -d|--database) 
+      dbname="$2";
+      shift 2
+      ;;
+     -n|--no-op)
+      runmode=false
+      shift
+      ;;
+     --)
+      # -- indicates end of options list - break out of the loop
+      shift
+      break
+      ;;
+     *)
+      # For any option other than above - return Invalid Option error
+      echo "ERROR: Invalid Option: $1" >&2
+      exit 1 
      ;;
-   *)
-     # For any option other than above - return Invalid Option error
-     echo "ERROR: Invalid Option: $1" >&2
-     exit 1 
-     ;;
-  esac 
-done 
-# End-While parse command-line options
+    esac 
+  done 
+  # End-While parse command-line options
 }
 
 # Process options and set/eval defaults 
@@ -113,8 +110,7 @@ function process_options(){
     echo "ERROR: -d <dbname> option is required. Run '$0 -h' to get usage help."
     exit 1
   fi
-  # Set mycnf (--defaults-file) value according to input options
-  # This will be used in constructing in actual commands 
+  # Set default values
   sccnf=${sccnf:=$sccnf_default}
   rdscnf=${rdscnf:=$rdscnf_default}
   runmode=${runmode:=$runmode_default}
@@ -129,9 +125,7 @@ function file_exists(){
   fi 
 }
 
-# Checks if given db already exists; continue if it doesn't exists
-# IP:mycnf, dbname
-# OP: exits with exit code 1 if db exists
+# Checks if given db already exists - return 0 if exists
 function db_exists(){
   mycnf_i=$1
   dbname_i=$2
@@ -143,16 +137,19 @@ function db_exists(){
   return 1
 }
 
+# Get master log file from dumpfile
 function db_get_master_file(){
   dumpfile_i="$1"
   awk -F "'"  '/-- CHANGE MASTER/ {print $2 }' $dumpfile_i
 }
 
+# Get master log position from dumpfile
 function db_get_master_pos(){
   dbname_i="$1"
   awk -F "MASTER_LOG_POS"  '/-- CHANGE MASTER/ {gsub(/=|;/, "", $2); print $2 }' $dumpfile_i
 }
 
+# Create mysqldump and save it to given dumpfile
 function db_create_dump(){
   mycnf_i="$1"
   dbname_i="$2"
@@ -165,8 +162,7 @@ function db_create_dump(){
   fi
 }
 
-# Tries to create given db
-# IP: mycnf, dbname 
+# Create DBs
 function create_db(){
   mycnf_i="$1"
   dbname_i="$2"
@@ -185,7 +181,7 @@ function create_db(){
   done
 }
 
-
+# Execute given mysql query
 function exec_query(){
   mycnf_i="$1"
   query_i="$2"
@@ -197,24 +193,21 @@ function exec_query(){
   return $?
 }
 
-
 # Main/FunctionCalls
 
-# Read Input: 
-# Call read_options to read options using getopt
+# Read Input
 read_options "$@"
 # Process options
 process_options
 # Checks  
-## Dry-Run to test connection, Check if db exists etc.
 file_exists $sccnf
 file_exists $rdscnf
 db_exists $sccnf $dbname
 ret="$?"
 if [[ "$ret" == 0 ]]; then
-  echo "Found $dbname on source"
+  echo "# Found $dbname on source"
 else
-  echo "$dbname not found on source host."
+  echo "# $dbname not found on source host."
   exit 1
 fi
 
@@ -224,6 +217,7 @@ datetime=$(date +%Y-%m-%d-%H-%M-%S)
 dumpfile="$dumphost-$datetime.dump"
 db_create_dump "$sccnf" "$dbname" "$dumpfile" $runmode
 
+# Get log file name and position from the dumpfile
 if $runmode; then
   mlf=`db_get_master_file $dumpfile`
   mlp=`db_get_master_pos $dumpfile`
@@ -232,8 +226,10 @@ else
   mlp='master-log-position'
 fi
 
+# Create database on RDS
 create_db "$rdscnf" "$dbname" "$runmode"
 
+# Load MySQL dump in given RDS instance
 echo "Loading MySQL dump to RDS"
 if $runmode; then
   mysql --defaults-file="$rdscnf" < "$dumpfile"
@@ -248,6 +244,8 @@ scpassword=${scpassword_t#*=}
 set_master="CALL mysql.rds_set_external_master ('$schost', 3306, '$scuser', '$scpassword', '$mlf', '$mlp', 1);"
 start_repl="CALL mysql.rds_start_replication;"
 
+# Execute RDS replication procedure calls
 exec_query $rdscnf "$set_master" "$runmode"
 exec_query $rdscnf "$start_repl" "$runmode"
+
 
