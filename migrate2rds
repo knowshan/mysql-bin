@@ -162,7 +162,7 @@ function db_create_dump(){
   dumpfile_i="$3"
   runmode_i="$4"
   cmd="mysqldump --defaults-extra-file=$mycnf_i --master-data=2 --databases ${dbname_i} > $dumpfile_i"
-  echo $cmd
+  echo "### Executing $cmd"
   if $runmode_i; then
     eval $cmd
   fi
@@ -182,7 +182,7 @@ function create_db(){
     create_db_exit_code="$?"
     # Tell user if db creation was successful; exit with an appropriate code
     if [[ $create_db_exit_code -eq 0 ]]; then  
-      echo "Created $d successfully."
+      echo "### Created $d successfully."
     fi
   done
 }
@@ -192,7 +192,7 @@ function exec_query(){
   mycnf_i="$1"
   query_i="$2"
   runmode_i="$3"
-  echo "# Executing: $query_i"
+  echo "### Executing: $query_i"
   if $runmode_i; then
     mysql --defaults-file="$mycnf_i" -e "$query_i"
   fi
@@ -211,9 +211,9 @@ file_exists $rdscnf
 db_exists $sccnf $dbname
 ret="$?"
 if [[ "$ret" == 0 ]]; then
-  echo "# Found $dbname on source"
+  echo "### Found dayabase $dbname on source."
 else
-  echo "# $dbname not found on source host."
+  echo "### $dbname not found on source"
   exit 1
 fi
 
@@ -236,9 +236,10 @@ fi
 create_db "$rdscnf" "$dbname" "$runmode"
 
 # Load MySQL dump in given RDS instance
-echo "Loading MySQL dump to RDS"
+cmd="mysql --defaults-file=${rdscnf} < ${dumpfile}"
+echo "### Loading MySQL dump to RDS $cmd"
 if $runmode; then
-  mysql --defaults-file="$rdscnf" < "$dumpfile"
+  eval "${cmd}"
 fi
 
 #Ugly hack to correctly parse values/password containing = 
