@@ -1,1 +1,4 @@
-MySQL related scripts
+MySQL related scripts:
+  * Create database
+  * Create user and grant privileges
+  * On-premise to RDS MySQL migration
