@@ -19,12 +19,14 @@
 usage(){
 cat << EOF
 HELP:
-Create database in the local MySQL server 
+Migrate on-premise MySQL DBMS server to RDS
 OPTIONS: 
 -h|--help                  Display this usage message
 -s|--source                Source database config file (Default: $HOME/.sc.my.cnf)
 -r|--rds                   RDS database config file (Default: $HOME/.rds.my.cnf)
 -d|--database              Database name to be migrated/replicated (Required)
+-i|--innodb                Convert MyISAM to InnoDB engine
+-e|--encryption-ssl        Use SSL encryption to communicate with the Master
 -n|--no-op                 Dry run - Check master status and connection strings etc - NOOP - Not Implemented!
 
 Format for connection-defaults file is same as MySQL 'defaults-file'. If this option is 
@@ -44,6 +46,7 @@ exit 0
 declare sccnf_default="$HOME/.sc.my.cnf"
 declare rdscnf_default="$HOME/.rds.my.cnf"
 declare runmode_default=true
+declare innodb_default=false
 declare sslencryption_default=0
 
 # Display usage help if script is called without any options
@@ -90,6 +93,10 @@ function read_options(){
       sslencryption=1
       shift
       ;;
+     -i|--innodb)
+      innodb=true
+      shift
+      ;;
      -n|--no-op)
       runmode=false
       shift
@@ -119,6 +126,7 @@ function process_options(){
   sccnf=${sccnf:=$sccnf_default}
   rdscnf=${rdscnf:=$rdscnf_default}
   runmode=${runmode:=$runmode_default}
+  innodb=${innodb:=$innodb_default}
   sslencryption=${sslencryption:=$sslencryption_default}
 }
 
@@ -221,7 +229,7 @@ file_exists $rdscnf
 db_exists $sccnf $dbname
 ret="$?"
 if [[ "$ret" == 0 ]]; then
-  echo "### Found dayabase $dbname on source."
+  echo "### Found database $dbname on source."
 else
   echo "### $dbname not found on source"
   exit 1
@@ -243,6 +251,9 @@ db_create_dump "$sccnf" "$dbname" "$dumpfile" $runmode
 if $runmode; then
   mlf=`db_get_master_file $dumpfile`
   mlp=`db_get_master_pos $dumpfile`
+  if $innodb; then
+    sed -i.bak 's#MyISAM#innodb#g' $dumpfile
+  fi
 else
   mlf='master-log-file'
   mlp='master-log-position'
